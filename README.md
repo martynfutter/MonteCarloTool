@@ -7,7 +7,7 @@ GenericMC is a C# (.NET) command-line tool for automated parameter estimation an
 ## Supported Models
 
 | ID | Model | Version |
-|----|-------|---------|
+| --- | --- | --- |
 | 1 | PERSiST | 1.4.x |
 | 2 | INCA-C | 1.7 |
 | 3 | INCA-PEco | All |
@@ -30,7 +30,7 @@ GenericMC is a C# (.NET) command-line tool for automated parameter estimation an
 - **GLUE analysis** — Latin Hypercube Sampling (LHS) for broad uncertainty quantification
 - **Multi-objective performance statistics** — weighted combinations of Nash-Sutcliffe (NS), log(NS), Pearson R², RMSE, Absolute Difference (AD), Variance Ratio (VR), Kling-Gupta Efficiency (KGE), and Limits of Acceptability (CatB/C)
 - **Per-series weighting** — individual weights for each observed data series and each statistic
-- **Results database** — outputs written to a Microsoft Access database (`mc.accdb`) for post-processing
+- **Results database** — outputs written to a SQLite database (`mc.db`) for post-processing; no proprietary database runtime required
 - **Parameter array output** — full parameter sets saved to CSV for external analysis
 
 ---
@@ -53,7 +53,7 @@ MCDemo/
 ├── Class_InteractWithModel.cs     # Model execution and performance statistic evaluation
 ├── Class_CommandString.cs         # Model-specific command-line string builder
 ├── Class_SummarizeResults.cs      # Post-run result collection and database writing
-├── Class_resultsDatabase.cs       # MS Access database interaction (ODBC)
+├── Class_resultsDatabase.cs       # SQLite database interaction
 ├── Class_GLUEAsASideEffect.cs     # GLUE run accounting and parameter saving
 ├── Class_NumericalSupport.cs      # Normal CDF inverse (for MCMC jump proposals)
 ├── Class_TestBed.cs               # Developer test harness
@@ -65,7 +65,7 @@ MCDemo/
 ## Requirements
 
 - **Runtime:** .NET Framework 4.8 (Windows)
-- **Database:** Microsoft Access runtime (for `.accdb` output); ODBC driver required
+- **Database:** SQLite — the database file (`mc.db`) is created automatically in the working directory; no additional runtime or driver installation is required
 - **Model executables:** one or more of the supported INCA/PERSiST command-line executables must be present in the working directory
 
 ---
@@ -81,15 +81,14 @@ Open `MCDemo.csproj` in Visual Studio (2013 or later) and build in Release or De
 Before running, place the following in the working directory alongside the executable:
 
 | File | Description |
-|------|-------------|
+| --- | --- |
 | `mc.par` | Initial parameter file (or model-specific name) |
 | `<model>_min.par` | Lower bounds for each parameter |
 | `<model>_max.par` | Upper bounds for each parameter |
-| `mc.accdb` | Blank Access database with the expected table schema |
 | Model executable | e.g. `persist_cmd.exe`, `inca_c_cmd.exe` |
 | Data/obs files | As required by the chosen model |
 
-The minimum/maximum parameter files follow the same whitespace-delimited format as the model's own `.par` files. Non-numeric tokens (strings) are carried through unchanged and are not perturbed during sampling.
+The SQLite database file (`mc.db`) is created automatically on first run. The minimum/maximum parameter files follow the same whitespace-delimited format as the model's own `.par` files. Non-numeric tokens (strings) are carried through unchanged and are not perturbed during sampling.
 
 ### Running
 
@@ -140,10 +139,10 @@ where `f_j` transforms each raw statistic into a value that should be **maximise
 ## Output Files
 
 | File | Contents |
-|------|----------|
+| --- | --- |
 | `bestParSet<N>.par` | Best parameter set for ensemble member N |
 | `logBestPerformance.txt` | Performance index log across MCMC iterations |
-| `mc.accdb` | Full results database (parameters, coefficients) |
+| `mc.db` | Full results database (parameters, coefficients) — SQLite format |
 | `pars.csv` | All parameter sets as a flat CSV array |
 | `parNames.csv` | Parameter name list |
 | `parList.csv` | Parameter values list |
@@ -159,7 +158,7 @@ where `f_j` transforms each raw statistic into a value that should be **maximise
 Key constants in `Class_MCParameters.cs`:
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
+| --- | --- | --- |
 | `maxTries` | 300 | Number of ensemble members to find |
 | `maxJumps` | 2500 | MCMC proposals per ensemble member |
 | `maxUnsuccessfulJumps` | 50 | Consecutive failures before restart |
@@ -172,14 +171,14 @@ Key constants in `Class_MCParameters.cs`:
 
 ## Notes and Limitations
 
-- The Access database backend requires a 32-bit ODBC driver; the project is built for x86.
+- The SQLite database (`mc.db`) is created automatically in the working directory; no pre-existing blank database file is required.
 - Several `writeResults()` branches are marked `notYetImplemented()` and produce text files instead of database records.
-- `Class_interactWithDatabasecs.cs` contains an earlier, partial database class that is superseded by `Class_resultsDatabase.cs`.
-- `tmp.cs` is an incomplete code fragment included in the repository and is not compiled.
 - The GLUE iteration count (12,500) is currently hard-coded in `Program.cs`.
 
 ---
 
 ## License
 
-No license file is present in the repository. Copyright © 2012 as noted in `AssemblyInfo.cs`.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+
+Copyright © 2012–2026 Martyn Futter.
