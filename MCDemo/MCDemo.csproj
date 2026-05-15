@@ -91,6 +91,7 @@
   <ItemGroup>
     <Compile Include="Class_GLUEAsASideEfffect.cs" />
     <Compile Include="Class_ParameterArrayList.cs" />
+    <Compile Include="Class_PostProcessing.cs" />
     <Compile Include="Class_resultsDatabase.cs" />
     <Compile Include="Class_SummarizeResults.cs" />
     <Compile Include="Class_CommandString.cs" />

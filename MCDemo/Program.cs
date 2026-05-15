@@ -109,6 +109,9 @@ namespace MC
 
             SummarizeResults.write(runString);
             SummarizeResults.noteSuccessfulCompletion();
+
+            new PostProcessing().Run();
+
             Console.ReadLine();
         }
         
@@ -161,6 +164,8 @@ namespace MC
             {
                 GLUEAccounting.GLUERun(runString, i);
             }
+
+            new PostProcessing().Run(); 
 
             //write a note of successful completion
             if (!File.Exists("SuccessfulCompletion.txt"))
