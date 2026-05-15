@@ -149,6 +149,6 @@ namespace MC
         public static ArrayList listOfContaminants = new ArrayList(); // list of contaminant names for INCA-Tox
 
         //parameters for database access
-        public static string databaseFileName = ".\\mc.accdb";
+        public static string databaseFileName = ".\\mc.db";
     }
 }
