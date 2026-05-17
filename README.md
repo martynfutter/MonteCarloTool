@@ -31,6 +31,7 @@ GenericMC is a C# (.NET) command-line tool for automated parameter estimation an
 - **Multi-objective performance statistics** — weighted combinations of Nash-Sutcliffe (NS), log(NS), Pearson R², RMSE, Absolute Difference (AD), Variance Ratio (VR), Kling-Gupta Efficiency (KGE), and Limits of Acceptability (CatB/C)
 - **Per-series weighting** — individual weights for each observed data series and each statistic
 - **Results database** — outputs written to a SQLite database (`mc.db`) for post-processing; no proprietary database runtime required
+- **KS sensitivity analysis** — Kolmogorov-Smirnov parameter sensitivity chain (formerly Access saved queries 101–116) implemented as SQLite views, queryable interactively via [DB Browser for SQLite](https://sqlitebrowser.org/)
 - **Parameter array output** — full parameter sets saved to CSV for external analysis
 
 ---
@@ -53,7 +54,8 @@ MCDemo/
 ├── Class_InteractWithModel.cs     # Model execution and performance statistic evaluation
 ├── Class_CommandString.cs         # Model-specific command-line string builder
 ├── Class_SummarizeResults.cs      # Post-run result collection and database writing
-├── Class_resultsDatabase.cs       # SQLite database interaction
+├── Class_resultsDatabase.cs       # SQLite database interaction; creates schema and KS views
+├── Class_PostProcessing.cs        # Post-run KS sensitivity analysis against mc.db
 ├── Class_GLUEAsASideEffect.cs     # GLUE run accounting and parameter saving
 ├── Class_NumericalSupport.cs      # Normal CDF inverse (for MCMC jump proposals)
 ├── Class_TestBed.cs               # Developer test harness
@@ -66,6 +68,7 @@ MCDemo/
 
 - **Runtime:** .NET Framework 4.8 (Windows)
 - **Database:** SQLite — the database file (`mc.db`) is created automatically in the working directory; no additional runtime or driver installation is required
+- **NuGet packages:** `System.Data.SQLite` (v1.0.117) and `EntityFramework` (v6.4.4) — restore automatically via NuGet Package Restore before building
 - **Model executables:** one or more of the supported INCA/PERSiST command-line executables must be present in the working directory
 
 ---
@@ -122,9 +125,30 @@ The tool is fully interactive. On startup it will ask you to:
 
 ### GLUE Workflow
 
-Runs a fixed number (default 12,500) of randomly sampled parameter sets using LHS, saves each set and its likelihood score to disk for post-processing.
+Runs a user-specified of randomly sampled parameter sets using LHS, saves each set and its likelihood score to disk for post-processing.
 
-### Performance Statistic
+### Post-processing and KS Sensitivity Analysis
+
+After all ensemble members have been collected, `Class_PostProcessing` runs a Kolmogorov-Smirnov (KS) parameter sensitivity analysis directly against `mc.db`. The analysis identifies which parameters were actually varied across Monte Carlo runs and tests whether the distribution of each parameter differs between behavioural and non-behavioural model runs.
+
+The analysis is implemented as a chain of SQLite views created automatically inside `mc.db`:
+
+| View | Replaces Access query |
+| --- | --- |
+| `vw_par_stats` | 101 Par Stats |
+| `vw_sampled_pars` | 102 Sampled Pars |
+| `vw_parameter_ranges` | 104 Parameter Ranges |
+| `vw_parameters_with_offsets` | 105 Parameters with Offsets |
+| `vw_observed_theoretical` | 106 Observed And Theoretical Offsets |
+| `vw_test_statistic` | 107 Test Statistic |
+| `vw_ks_d_statistic` | 108 KS D Statistic |
+| `vw_ks_d_with_range` | 109 KS D Statistic with RunTerm |
+| `vw_ks_d_and_z` | 110 KS D and z |
+| `vw_ks_p` | 111–114 p-value terms |
+| `vw_ks_with_names` | 115 KS D z and P with Names |
+| `vw_statistics_summary` | 116 Statistics Summary |
+
+These views can be queried interactively after a run using [DB Browser for SQLite](https://sqlitebrowser.org/) or any other SQLite client. The final sensitivity results are also written to the `ParameterSensitivitySummary` table in `mc.db`.
 
 The composite objective function is a weighted sum over all observed series:
 
@@ -142,7 +166,7 @@ where `f_j` transforms each raw statistic into a value that should be **maximise
 | --- | --- |
 | `bestParSet<N>.par` | Best parameter set for ensemble member N |
 | `logBestPerformance.txt` | Performance index log across MCMC iterations |
-| `mc.db` | Full results database (parameters, coefficients) — SQLite format |
+| `mc.db` | Full results database (parameters, coefficients, KS views) — SQLite format |
 | `pars.csv` | All parameter sets as a flat CSV array |
 | `parNames.csv` | Parameter name list |
 | `parList.csv` | Parameter values list |
@@ -173,7 +197,12 @@ Key constants in `Class_MCParameters.cs`:
 
 - The SQLite database (`mc.db`) is created automatically in the working directory; no pre-existing blank database file is required.
 - Several `writeResults()` branches are marked `notYetImplemented()` and produce text files instead of database records.
-- The GLUE iteration count (12,500) is currently hard-coded in `Program.cs`.
+
+---
+
+## Acknowledgements
+
+This work was part-funded by the **FORMAS / JPI Water FESTiVAL project**. The authors gratefully acknowledge this support.
 
 ---
 
