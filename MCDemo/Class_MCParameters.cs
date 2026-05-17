@@ -9,7 +9,8 @@ namespace MC
     public static class MCParameters
     {
         public static int model = 1;
-        
+
+        public static int GLUERuns = 1000;        
         public enum modelID : int
         {
             persist14   = 1,

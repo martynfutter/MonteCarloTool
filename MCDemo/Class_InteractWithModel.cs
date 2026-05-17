@@ -835,6 +835,23 @@ namespace MC
             }
         }
 
+        public static void setGLUECount()
+        {
+            string r;
+            int s;
+
+            Console.Write("Please enter the number of GLUE runs to perform: ");
+            r = Console.ReadLine();
+            try
+            {
+                s = Convert.ToInt32(r);
+                MCParameters.GLUERuns = s;
+            }
+            catch
+            {
+                Console.WriteLine("You did not enter a valid number, the number of runs has been set to {0}", MCParameters.GLUERuns);
+            }
+        }
         public static void setRunMCParameters()
         {
             string r;

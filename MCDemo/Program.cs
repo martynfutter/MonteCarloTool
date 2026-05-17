@@ -122,6 +122,8 @@ namespace MC
             {
                 File.Delete("SuccessfulCompletion.txt");
             }
+            InteractWithModel.setGLUECount();
+
             InteractWithModel.WhatModel();
 
             //use the commandString to get all the arguments
@@ -129,7 +131,7 @@ namespace MC
             //use runString to get the right set of output files written, "-size none" during runs
             String runString;
 
-            InteractWithModel.setRunMCParameters();
+            //InteractWithModel.setRunMCParameters();
 
             cs.Populate();
 
@@ -160,7 +162,7 @@ namespace MC
             InteractWithModel.WriteCoefficientWeights();
             InteractWithModel.SetSeriesWeights();
             
-            for(long i=0;i<12500; i++)
+            for(long i=0;i<MCParameters.GLUERuns; i++)
             {
                 GLUEAccounting.GLUERun(runString, i);
             }
