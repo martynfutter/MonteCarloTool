@@ -31,7 +31,7 @@ GenericMC is a C# (.NET) command-line tool for automated parameter estimation an
 - **Multi-objective performance statistics** — weighted combinations of Nash-Sutcliffe (NS), log(NS), Pearson R², RMSE, Absolute Difference (AD), Variance Ratio (VR), Kling-Gupta Efficiency (KGE), and Limits of Acceptability (CatB/C)
 - **Per-series weighting** — individual weights for each observed data series and each statistic
 - **Results database** — outputs written to a SQLite database (`mc.db`) for post-processing; no proprietary database runtime required
-- **KS sensitivity analysis** — Kolmogorov-Smirnov parameter sensitivity chain (formerly Access saved queries 101–116) implemented as SQLite views, queryable interactively via [DB Browser for SQLite](https://sqlitebrowser.org/)
+- **KS sensitivity analysis** — Kolmogorov-Smirnov parameter sensitivity chain implemented as SQLite views, queryable interactively via [DB Browser for SQLite](https://sqlitebrowser.org/)
 - **Parameter array output** — full parameter sets saved to CSV for external analysis
 
 ---
@@ -93,20 +93,32 @@ Before running, place the following in the working directory alongside the execu
 
 The SQLite database file (`mc.db`) is created automatically on first run. The minimum/maximum parameter files follow the same whitespace-delimited format as the model's own `.par` files. Non-numeric tokens (strings) are carried through unchanged and are not perturbed during sampling.
 
-### Running
+### Running the Executable
 
-```
-GenericMC.exe
-```
+`GenericMC.exe` is a Windows command-line application. The simplest way to run it is:
 
-The tool is fully interactive. On startup it will ask you to:
+1. Open a **Command Prompt** (`cmd.exe`) or **PowerShell** window.
+2. Navigate to the folder containing the executable and all required input files:
+   ```
+   cd C:\path\to\your\working\directory
+   ```
+3. Launch the tool:
+   ```
+   GenericMC.exe
+   ```
 
-1. Choose **MCTool** (MCMC) or **GLUE**
-2. Select the model
+Alternatively, you can double-click `GenericMC.exe` in File Explorer — a console window will open automatically.
+
+The tool is fully interactive. On startup it will prompt you to answer a series of questions:
+
+1. Choose **1** for MCTool (MCMC) or **2** for GLUE
+2. Select the model number from the Supported Models table above
 3. Enter the number of ensemble members and MCMC jump iterations
-4. Provide all required file names (parameter, data, observed, etc.)
-5. Set per-statistic and per-series weights
-6. Set the jump scaling factor
+4. Provide all required file names (parameter, data, observed, etc.) — press Enter to accept any default shown in square brackets
+5. Set per-statistic and per-series weights (enter `0` to skip a statistic)
+6. Set the jump scaling factor (default `0.01` is a reasonable starting point)
+
+The tool will then run without further interaction. Progress is printed to the console as each ensemble member is found. A `SuccessfulCompletion.txt` file is written in the working directory when the run finishes cleanly.
 
 ---
 
@@ -125,7 +137,7 @@ The tool is fully interactive. On startup it will ask you to:
 
 ### GLUE Workflow
 
-Runs a user-specified of randomly sampled parameter sets using LHS, saves each set and its likelihood score to disk for post-processing.
+Runs a user-specified number of randomly sampled parameter sets using LHS, saves each set and its likelihood score to disk for post-processing.
 
 ### Post-processing and KS Sensitivity Analysis
 
@@ -133,22 +145,24 @@ After all ensemble members have been collected, `Class_PostProcessing` runs a Ko
 
 The analysis is implemented as a chain of SQLite views created automatically inside `mc.db`:
 
-| View | Replaces Access query |
+| View | Description |
 | --- | --- |
-| `vw_par_stats` | 101 Par Stats |
-| `vw_sampled_pars` | 102 Sampled Pars |
-| `vw_parameter_ranges` | 104 Parameter Ranges |
-| `vw_parameters_with_offsets` | 105 Parameters with Offsets |
-| `vw_observed_theoretical` | 106 Observed And Theoretical Offsets |
-| `vw_test_statistic` | 107 Test Statistic |
-| `vw_ks_d_statistic` | 108 KS D Statistic |
-| `vw_ks_d_with_range` | 109 KS D Statistic with RunTerm |
-| `vw_ks_d_and_z` | 110 KS D and z |
-| `vw_ks_p` | 111–114 p-value terms |
-| `vw_ks_with_names` | 115 KS D z and P with Names |
-| `vw_statistics_summary` | 116 Statistics Summary |
+| `vw_par_stats` | Aggregates min, average, and max value for each parameter across all Monte Carlo runs |
+| `vw_sampled_pars` | Filters to parameters that were actually varied during the run (min value ≠ max value) |
+| `vw_parameter_ranges` | Computes the full value range and run count for each sampled parameter |
+| `vw_parameters_with_offsets` | Assigns a rank offset to each parameter value within its range, used to build the empirical CDF |
+| `vw_observed_theoretical` | Calculates the observed (empirical) and theoretical (uniform) CDF values at each ranked point |
+| `vw_test_statistic` | Computes the absolute difference between the empirical and theoretical CDFs at every point |
+| `vw_ks_d_statistic` | Extracts the maximum CDF difference (the KS D statistic) for each parameter |
+| `vw_ks_d_with_range` | Joins the D statistic back to the CDF point where it occurs and computes the run-count term used in the z score |
+| `vw_ks_d_and_z` | Converts the D statistic to a z score using the standard KS approximation formula |
+| `vw_ks_p` | Approximates the two-tailed p-value from z using a 4-term KS series expansion |
+| `vw_ks_with_names` | Joins the KS results with parameter names from `ParNames` for readability |
+| `vw_statistics_summary` | Final sensitivity table combining parameter names, D statistic, z score, p-value, and sampled value ranges |
 
-These views can be queried interactively after a run using [DB Browser for SQLite](https://sqlitebrowser.org/) or any other SQLite client. The final sensitivity results are also written to the `ParameterSensitivitySummary` table in `mc.db`.
+The final sensitivity results are also written to the `ParameterSensitivitySummary` table in `mc.db`.
+
+### Performance Statistic
 
 The composite objective function is a weighted sum over all observed series:
 
@@ -174,6 +188,37 @@ where `f_j` transforms each raw statistic into a value that should be **maximise
 | `results<N>.txt` | Model output for split N |
 | `GLUEPerformance.csv` | GLUE run scores (GLUE mode only) |
 | `SuccessfulCompletion.txt` | Written on clean exit |
+
+---
+
+## Exploring the Results Database
+
+All results are stored in `mc.db`, a standard SQLite database file that can be opened with any SQLite-compatible tool. [DB Browser for SQLite](https://sqlitebrowser.org/) is recommended — it is free, open-source, and requires no installation beyond the installer.
+
+### Using DB Browser for SQLite
+
+1. **Download and install** DB Browser from [https://sqlitebrowser.org/dl/](https://sqlitebrowser.org/dl/) (choose the Windows installer).
+2. **Open the database:** click **Open Database** and navigate to the `mc.db` file in your working directory.
+3. **Browse tables:** the **Database Structure** tab lists all tables and views. Key tables include:
+   - `ParNames` — parameter names
+   - `ParList` — all parameter values for every run
+   - `SortedParameters` — varied parameters sorted for KS analysis
+   - `Coefficients` — goodness-of-fit statistics per run
+   - `ParameterSensitivitySummary` — final KS sensitivity results
+4. **Query views:** switch to the **Execute SQL** tab to run queries directly against the KS analysis views. For example, to see all varied parameters ranked by sensitivity:
+   ```sql
+   SELECT * FROM vw_statistics_summary ORDER BY D DESC;
+   ```
+5. **Export results:** right-click any table or query result and choose **Export to CSV** to save data for further analysis in Excel, R, or Python.
+
+### Alternative SQLite Tools
+
+Any tool that supports SQLite 3 can read `mc.db`. Some popular options are:
+
+- **Python** (`sqlite3` standard library or `pandas.read_sql`) — straightforward for scripted post-processing
+- **R** (`RSQLite` package) — integrates directly with data frames
+- **DBeaver** (free, cross-platform) — full-featured database browser with SQL editor
+- **SQLiteOnline** ([sqliteonline.com](https://sqliteonline.com)) — browser-based, no installation required; upload `mc.db` and query directly
 
 ---
 
