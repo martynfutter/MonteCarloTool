@@ -130,28 +130,6 @@ namespace MC
             Console.WriteLine("PostProcessing: SortedParameters populated.");
         }
 
-        /// <summary>
-        /// Materialises vw_percentile_summary into a permanent PercentileSummary table.
-        ///
-        /// The view computes ranked percentiles (nearest-rank method) and null
-        /// percentiles (linear interpolation between min and max) at the 10th,
-        /// 25th, 50th, 75th and 90th percentiles for each sampled parameter,
-        /// joining SortedParameters with ParNames.
-        ///
-        /// Must be called after AppendSampledParameters() so that SortedParameters
-        /// is fully populated before the view is evaluated.
-        /// </summary>
-        private void MaterialisePercentileSummary()
-        {
-            Console.WriteLine("PostProcessing: creating PercentileSummary table...");
-            ExecuteSQLCommand("DROP TABLE IF EXISTS PercentileSummary");
-            ExecuteSQLCommand(
-                "CREATE TABLE PercentileSummary AS " +
-                "SELECT name, percentile, ranked_value, null_value " +
-                "FROM   vw_percentile_summary");
-            Console.WriteLine("PostProcessing: PercentileSummary created.");
-        }
-
         // -------------------------------------------------------------------------
         // Public entry point
         // -------------------------------------------------------------------------
@@ -170,7 +148,6 @@ namespace MC
             }
 
             AppendSampledParameters();
-            MaterialisePercentileSummary();
             // Additional post-processing methods can be called here, e.g.:
             // AppendDValues();
             // ComputeKolmogorovSmirnovStatistics();

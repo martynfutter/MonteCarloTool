@@ -16,9 +16,6 @@
 //   - Parameterised queries used for all INSERT statements
 //   - Missing comma bug fixed in makeObservationsTable()
 //   - EnsureSchema() creates all permanent tables and KS views on first run
-//   - vw_percentile_summary view added to CreateKSViews() — provides ranked and
-//     null percentiles (10th, 25th, 50th, 75th, 90th) for each sampled parameter;
-//     materialised into PercentileSummary table by Class_PostProcessing.
 //
 // NuGet dependency: System.Data.SQLite (install via NuGet — search for System.Data.SQLite)
 //
@@ -139,19 +136,18 @@ namespace MC
         /// sensitivity analysis. These replace the Access saved queries 101-116.
         ///
         /// View chain:
-        ///   vw_par_stats               [101 Par Stats]
-        ///   vw_sampled_pars            [102 Sampled Pars]
-        ///   vw_parameter_ranges        [104 Parameter Ranges]
+        ///   vw_par_stats             [101 Par Stats]
+        ///   vw_sampled_pars          [102 Sampled Pars]
+        ///   vw_parameter_ranges      [104 Parameter Ranges]
         ///   vw_parameters_with_offsets [105 Parameters with Offsets]
-        ///   vw_observed_theoretical    [106 Observed And Theoretical Offsets]
-        ///   vw_test_statistic          [107 Test Statistic]
-        ///   vw_ks_d_statistic          [108 KS D Statistic]
-        ///   vw_ks_d_with_range         [109 KS D Statistic with RunTerm]
-        ///   vw_ks_d_and_z              [110 KS D and z]
-        ///   vw_ks_p                    [111-114 p-value terms combined]
-        ///   vw_ks_with_names           [115 KS D z and P with Names]
-        ///   vw_statistics_summary      [116 Statistics Summary]
-        ///   vw_percentile_summary      Ranked and null percentiles per parameter
+        ///   vw_observed_theoretical  [106 Observed And Theoretical Offsets]
+        ///   vw_test_statistic        [107 Test Statistic]
+        ///   vw_ks_d_statistic        [108 KS D Statistic]
+        ///   vw_ks_d_with_range       [109 KS D Statistic with RunTerm]
+        ///   vw_ks_d_and_z            [110 KS D and z]
+        ///   vw_ks_p                  [111-114 p-value terms combined]
+        ///   vw_ks_with_names         [115 KS D z and P with Names]
+        ///   vw_statistics_summary    [116 Statistics Summary]
         ///
         /// All views use CREATE VIEW IF NOT EXISTS so they are safe to call repeatedly.
         /// </summary>
@@ -285,61 +281,6 @@ namespace MC
                         k.xRange, k.z, k.p
                 FROM    vw_sampled_pars s
                 INNER JOIN vw_ks_with_names k ON s.ParID = k.ParID");
-
-            // Percentile summary view.
-            // Computes ranked percentiles (nearest-rank method) and null percentiles
-            // (linear interpolation between min and max) for the 10th, 25th, 50th,
-            // 75th and 90th percentiles of each sampled parameter.
-            // Materialised into the PercentileSummary table by Class_PostProcessing
-            // after SortedParameters has been fully populated.
-            executeSQLCommand(@"
-                CREATE VIEW IF NOT EXISTS vw_percentile_summary AS
-                WITH ranked AS (
-                    SELECT
-                        n.ParName                                                              AS name,
-                        sp.ParameterValue                                                      AS value,
-                        ROW_NUMBER() OVER (PARTITION BY n.ParName ORDER BY sp.ParameterValue) AS rn,
-                        COUNT(*)     OVER (PARTITION BY n.ParName)                             AS cnt
-                    FROM SortedParameters sp
-                    INNER JOIN ParNames n ON sp.ParID = n.ParID
-                ),
-                ranked_percentiles AS (
-                    SELECT
-                        name,
-                        MAX(CASE WHEN rn = MAX(1, ROUND(0.10 * cnt)) THEN value END) AS p10,
-                        MAX(CASE WHEN rn = MAX(1, ROUND(0.25 * cnt)) THEN value END) AS p25,
-                        MAX(CASE WHEN rn = MAX(1, ROUND(0.50 * cnt)) THEN value END) AS p50,
-                        MAX(CASE WHEN rn = MAX(1, ROUND(0.75 * cnt)) THEN value END) AS p75,
-                        MAX(CASE WHEN rn = MAX(1, ROUND(0.90 * cnt)) THEN value END) AS p90
-                    FROM ranked
-                    GROUP BY name
-                ),
-                null_percentiles AS (
-                    SELECT
-                        n.ParName                                                                          AS name,
-                        MIN(sp.ParameterValue) + 0.10 * (MAX(sp.ParameterValue) - MIN(sp.ParameterValue)) AS p10,
-                        MIN(sp.ParameterValue) + 0.25 * (MAX(sp.ParameterValue) - MIN(sp.ParameterValue)) AS p25,
-                        MIN(sp.ParameterValue) + 0.50 * (MAX(sp.ParameterValue) - MIN(sp.ParameterValue)) AS p50,
-                        MIN(sp.ParameterValue) + 0.75 * (MAX(sp.ParameterValue) - MIN(sp.ParameterValue)) AS p75,
-                        MIN(sp.ParameterValue) + 0.90 * (MAX(sp.ParameterValue) - MIN(sp.ParameterValue)) AS p90
-                    FROM SortedParameters sp
-                    INNER JOIN ParNames n ON sp.ParID = n.ParID
-                    GROUP BY n.ParName
-                ),
-                unpivoted AS (
-                    SELECT r.name, 10 AS percentile, r.p10 AS ranked_value, n.p10 AS null_value FROM ranked_percentiles r JOIN null_percentiles n ON r.name = n.name
-                    UNION ALL
-                    SELECT r.name, 25,               r.p25,                  n.p25              FROM ranked_percentiles r JOIN null_percentiles n ON r.name = n.name
-                    UNION ALL
-                    SELECT r.name, 50,               r.p50,                  n.p50              FROM ranked_percentiles r JOIN null_percentiles n ON r.name = n.name
-                    UNION ALL
-                    SELECT r.name, 75,               r.p75,                  n.p75              FROM ranked_percentiles r JOIN null_percentiles n ON r.name = n.name
-                    UNION ALL
-                    SELECT r.name, 90,               r.p90,                  n.p90              FROM ranked_percentiles r JOIN null_percentiles n ON r.name = n.name
-                )
-                SELECT name, percentile, ranked_value, null_value
-                FROM unpivoted
-                ORDER BY name, percentile");
         }
 
         // -------------------------------------------------------------------------
@@ -370,7 +311,6 @@ namespace MC
             executeSQLCommand("DROP TABLE IF EXISTS INCAInputs");
             executeSQLCommand("DROP TABLE IF EXISTS Observations");
             executeSQLCommand("DROP TABLE IF EXISTS ParameterSensitivitySummary");
-            executeSQLCommand("DROP TABLE IF EXISTS PercentileSummary");
 
             CloseConnection();
         }
