@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Collections;
 using System.Collections.Generic;
@@ -19,10 +19,36 @@ namespace MC
             Console.WriteLine("* Choose 2 for GLUE          *");
             Console.WriteLine("* Any other key to exit      *");
             Console.WriteLine("******************************");
-            s=Console.ReadLine();
+            s = Console.ReadLine();
             int.TryParse(s, out i);
 
             MCParameters.GLUE = i;
+
+            // Prompt for an optional run subdirectory.
+            // All model inputs, executables and outputs will be read from and
+            // written to this directory.  Pressing Enter skips the change and
+            // preserves the original flat-directory behaviour.
+            if (i == 1 || i == 2)
+            {
+                Console.Write("Please enter the run subdirectory name (press Enter to use current directory): ");
+                string subDir = Console.ReadLine().Trim();
+
+                if (!string.IsNullOrEmpty(subDir))
+                {
+                    if (!Directory.Exists(subDir))
+                    {
+                        Directory.CreateDirectory(subDir);
+                        Console.WriteLine("Created subdirectory: {0}", subDir);
+                    }
+
+                    // Redirect all subsequent relative-path file I/O into the
+                    // chosen subdirectory.  The spawned model process inherits
+                    // this working directory automatically via ProcessStartInfo.
+                    Directory.SetCurrentDirectory(subDir);
+                    MCParameters.runDirectory = subDir;
+                    Console.WriteLine("Working directory set to: {0}", Directory.GetCurrentDirectory());
+                }
+            }
 
             switch (i)
             {
@@ -51,7 +77,7 @@ namespace MC
 
             MCResults.cleanUp();
             
-             InteractWithModel.WhatModel();
+            InteractWithModel.WhatModel();
 
             //use the commandString to get all the arguments
             CommandString cs = new CommandString();

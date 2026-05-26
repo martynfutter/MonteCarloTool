@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -31,7 +31,6 @@ namespace MC
         public static string modelName()
         {
             string modelName;
-            //InteractWithModel.availableModels.Find(i => i.p )
             switch (MCParameters.model)
             {
                 case 1:
@@ -110,6 +109,10 @@ namespace MC
         public static string parameterNameListFile = "parNames.csv";
         public static string parameterValueListFile = "parList.csv";
         public static string parameterArrayFileName = "pars.csv";
+
+        // Path of the run subdirectory chosen at startup.
+        // Empty string means the tool is running in the current directory (legacy behaviour).
+        public static string runDirectory = "";
 
         public static double defaultScalingFactorForJump = 0.01;
         public static double testPerformanceAdjustmentFactor = 1;
