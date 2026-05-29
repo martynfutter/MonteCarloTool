@@ -19,6 +19,8 @@
 //   - vw_percentile_summary view added to CreateKSViews() — provides ranked and
 //     null percentiles (10th, 25th, 50th, 75th, 90th) for each sampled parameter;
 //     materialised into PercentileSummary table by Class_PostProcessing.
+//   - vw_sorted_parameters_named view added to CreateKSViews() — joins
+//     SortedParameters to ParNames on ParID so each row includes the parameter name.
 //
 // NuGet dependency: System.Data.SQLite (install via NuGet — search for System.Data.SQLite)
 //
@@ -152,6 +154,7 @@ namespace MC
         ///   vw_ks_with_names           [115 KS D z and P with Names]
         ///   vw_statistics_summary      [116 Statistics Summary]
         ///   vw_percentile_summary      Ranked and null percentiles per parameter
+        ///   vw_sorted_parameters_named SortedParameters joined to ParNames on ParID
         ///
         /// All views use CREATE VIEW IF NOT EXISTS so they are safe to call repeatedly.
         /// </summary>
@@ -207,10 +210,11 @@ namespace MC
             // Empirical (observed) CDF vs theoretical uniform CDF.
             executeSQLCommand(@"
                 CREATE VIEW IF NOT EXISTS vw_observed_theoretical AS
-                SELECT  ParID, ID, Offset, MinOfParameterValue, ParameterValue, MaxOfParameterValue,
-                        CAST(Offset AS REAL) / CAST(Runs AS REAL)         AS ObservedCDF,
-                        (ParameterValue     - MinOfParameterValue) /
-                        (MaxOfParameterValue - MinOfParameterValue)        AS TheoreticalCDF,
+                SELECT  ParID, ID, Offset,
+                        MinOfParameterValue, ParameterValue, MaxOfParameterValue,
+                        CAST(Offset AS REAL) / Runs                                          AS ObservedCDF,
+                        (ParameterValue - MinOfParameterValue)
+                            / (MaxOfParameterValue - MinOfParameterValue)                    AS TheoreticalCDF,
                         Runs
                 FROM    vw_parameters_with_offsets");
 
@@ -224,7 +228,7 @@ namespace MC
                 FROM    vw_observed_theoretical");
 
             // [108 KS D Statistic]
-            // Maximum CDF difference (D) per parameter — the KS test statistic.
+            // Maximum test statistic (D) per parameter.
             executeSQLCommand(@"
                 CREATE VIEW IF NOT EXISTS vw_ks_d_statistic AS
                 SELECT  ParID, MAX(Test) AS D, Runs
@@ -232,21 +236,20 @@ namespace MC
                 GROUP BY ParID, Runs");
 
             // [109 KS D Statistic with RunTerm]
-            // Joins back to find the TheoreticalCDF (xRange) at the D-statistic point.
-            // Access formula: Sqr(Runs*Runs/(2*Runs)) simplifies to SQRT(Runs/2).
+            // Attach the x-range value and compute the run-size correction term.
             executeSQLCommand(@"
                 CREATE VIEW IF NOT EXISTS vw_ks_d_with_range AS
-                SELECT  k.ParID,
-                        k.D,
-                        t.TheoreticalCDF                      AS xRange,
-                        k.Runs,
-                        SQRT(CAST(k.Runs AS REAL) / 2.0)      AS RunTerm
+                SELECT  d.ParID, d.D,
+                        t.TheoreticalCDF AS xRange,
+                        d.Runs,
+                        SQRT(d.Runs * d.Runs / (2.0 * d.Runs)) AS RunTerm
                 FROM    vw_test_statistic t
-                INNER JOIN vw_ks_d_statistic k
-                    ON  k.D = t.Test AND t.ParID = k.ParID");
+                INNER JOIN vw_ks_d_statistic d
+                        ON  d.ParID = t.ParID
+                        AND d.D     = t.Test");
 
             // [110 KS D and z]
-            // Convert D statistic to z score.
+            // Compute the KS z statistic from D and the run-size correction term.
             executeSQLCommand(@"
                 CREATE VIEW IF NOT EXISTS vw_ks_d_and_z AS
                 SELECT  ParID, D, xRange,
@@ -340,6 +343,21 @@ namespace MC
                 SELECT name, percentile, ranked_value, null_value
                 FROM unpivoted
                 ORDER BY name, percentile");
+
+            // Sorted parameters with parameter names.
+            // Joins SortedParameters to ParNames on ParID so each row includes the
+            // parameter name alongside its sorted value and run ID.
+            // Ordered by ParID then ParameterValue to match the insert order used
+            // by processParameterData() / AppendSampledParameters().
+            executeSQLCommand(@"
+                CREATE VIEW IF NOT EXISTS vw_sorted_parameters_named AS
+                SELECT  n.ParName,
+                        s.ParID,
+                        s.ParameterValue,
+                        s.RunID
+                FROM    SortedParameters s
+                INNER JOIN ParNames n ON s.ParID = n.ParID
+                ORDER BY s.ParID, s.ParameterValue");
         }
 
         // -------------------------------------------------------------------------
@@ -572,8 +590,7 @@ namespace MC
                     makePERSiSTCoefficientsTable();
                     break;
                 case 2:  // INCA-C 1.7
-                case 11: // INCA-C 2.x
-                    makeINCA_CCoefficientsTable();
+                    makeDefaultCoefficientsTable();
                     break;
                 case 3:  // INCA-PEco
                     makeINCA_PEcoCoefficientsTable();
@@ -594,15 +611,17 @@ namespace MC
                 case 10: // PERSiST 2.0
                     makePERSiST_v2CoefficientsTable();
                     break;
+                case 11: // INCA-C 2.x
+                    makeDefaultCoefficientsTable();
+                    break;
                 case 12: // INCA-N Classic
-                    makeINCA_NCoefficientsTable();
+                    makeDefaultCoefficientsTable();
                     break;
                 case 13: // INCA-C 1.8
                     makeINCA_C18CoefficientsTable();
                     break;
                 default:
                     Console.WriteLine("Something has gone wrong when making the COEFFICIENTS table");
-                    Console.ReadLine();
                     break;
             }
 
@@ -624,8 +643,67 @@ namespace MC
                 "DateStamp  TEXT)");
         }
 
-        private void makeINCA_NCoefficientsTable()  { makeDefaultCoefficientsTable(); }
-        private void makeINCA_CCoefficientsTable()  { makeDefaultCoefficientsTable(); }
+        private void makePERSiSTCoefficientsTable()
+        {
+            executeSQLCommand(
+                "CREATE TABLE Coefficients (" +
+                "RUN       INTEGER," +
+                "RowNumber  INTEGER," +
+                "Reach      TEXT," +
+                "R2         REAL," +
+                "NS         REAL," +
+                "LOG_NS     REAL," +
+                "RMSE       REAL," +
+                "RE         REAL," +
+                "AD         REAL," +
+                "VAR        REAL," +
+                "N          REAL," +
+                "N_RE       REAL," +
+                "DateStamp  TEXT)");
+        }
+
+        private void makePERSiST_v2CoefficientsTable()
+        {
+            executeSQLCommand(
+                "CREATE TABLE Coefficients (" +
+                "RUN       INTEGER," +
+                "RowNumber  INTEGER," +
+                "Reach      TEXT," +
+                "Parameter  TEXT," +
+                "R2         REAL," +
+                "NS         REAL," +
+                "LOG_NS     REAL," +
+                "RMSE       REAL," +
+                "RE         REAL," +
+                "AD         REAL," +
+                "VAR        REAL," +
+                "N          REAL," +
+                "N_RE       REAL," +
+                "SS         REAL," +
+                "LOG_SS     REAL," +
+                "DateStamp  TEXT)");
+        }
+
+        private void makeINCA_C18CoefficientsTable()
+        {
+            executeSQLCommand(
+                "CREATE TABLE Coefficients (" +
+                "RUN       INTEGER," +
+                "RowNumber  INTEGER," +
+                "Reach      TEXT," +
+                "Parameter  TEXT," +
+                "R2         REAL," +
+                "NS         REAL," +
+                "LOG_NS     REAL," +
+                "RMSE       REAL," +
+                "RE         REAL," +
+                "AD         REAL," +
+                "VAR        REAL," +
+                "N          REAL," +
+                "N_RE       REAL," +
+                "DateStamp  TEXT)");
+        }
+
         private void makeINCA_HgCoefficientsTable() { makeDefaultCoefficientsTable(); }
 
         private void makeINCA_ONTHECoefficientsTable()
@@ -680,69 +758,6 @@ namespace MC
                 "RMSE       REAL," +
                 "RE         REAL," +
                 "VR         REAL," +
-                "DateStamp  TEXT)");
-        }
-
-        private void makePERSiSTCoefficientsTable()
-        {
-            executeSQLCommand(
-                "CREATE TABLE Coefficients (" +
-                "RUN       INTEGER," +
-                "RowNumber  INTEGER," +
-                "Reach      TEXT," +
-                "R2         REAL," +
-                "NS         REAL," +
-                "LOG_NS     REAL," +
-                "RMSE       REAL," +
-                "RE         REAL," +
-                "AD         REAL," +
-                "VAR        REAL," +
-                "N          REAL," +
-                "N_RE       REAL," +
-                "SS         REAL," +
-                "LOG_SS     REAL," +
-                "DateStamp  TEXT)");
-        }
-
-        private void makeINCA_C18CoefficientsTable()
-        {
-            executeSQLCommand(
-                "CREATE TABLE Coefficients (" +
-                "RUN       INTEGER," +
-                "RowNumber  INTEGER," +
-                "Reach      TEXT," +
-                "Parameter  TEXT," +
-                "R2         REAL," +
-                "NS         REAL," +
-                "LOG_NS     REAL," +
-                "RMSE       REAL," +
-                "RE         REAL," +
-                "AD         REAL," +
-                "VAR        REAL," +
-                "N          REAL," +
-                "N_RE       REAL," +
-                "DateStamp  TEXT)");
-        }
-
-        private void makePERSiST_v2CoefficientsTable()
-        {
-            executeSQLCommand(
-                "CREATE TABLE Coefficients (" +
-                "RUN       INTEGER," +
-                "RowNumber  INTEGER," +
-                "Reach      TEXT," +
-                "Parameter  TEXT," +
-                "R2         REAL," +
-                "NS         REAL," +
-                "LOG_NS     REAL," +
-                "RMSE       REAL," +
-                "RE         REAL," +
-                "AD         REAL," +
-                "VAR        REAL," +
-                "N          REAL," +
-                "N_RE       REAL," +
-                "SS         REAL," +
-                "LOG_SS     REAL," +
                 "DateStamp  TEXT)");
         }
 
@@ -831,7 +846,7 @@ namespace MC
                             {
                                 reachName = fields[2];
                             }
-                            else if ((rownum % 7) > 1)
+                            else
                             {
                                 InsertCoefficients(
                                     "(RUN, RowNumber, Reach, Parameter, R2, NS, LOG_NS, RMSE, RE, AD, VAR, N, N_RE, DateStamp)",
@@ -839,41 +854,6 @@ namespace MC
                                     fields[3], fields[4], fields[5], fields[6],
                                     fields[7], fields[8], fields[9], fields[10],
                                     fields[11]);
-                            }
-                        }
-                        catch (Exception ex) { Console.WriteLine(ex.Message); }
-                    }
-                }
-                transaction.Commit();
-            }
-            catch (Exception ex) { Console.WriteLine(ex.Message); transaction.Rollback(); }
-        }
-
-        private void writePERSiSTCoefficients()
-        {
-            using (var transaction = localConnection.BeginTransaction())
-            try
-            {
-                using (StreamReader sr = new StreamReader(MCParameters.coefficientsSummaryFile))
-                {
-                    string line;
-                    while ((line = sr.ReadLine()) != null)
-                    {
-                        try
-                        {
-                            string[] fields = line.Split(MCParameters.separatorChar);
-                            if (fields[1].Equals("0"))
-                            {
-                                Console.WriteLine(line);
-                            }
-                            else
-                            {
-                                InsertCoefficients(
-                                    "(RUN, RowNumber, Reach, R2, NS, LOG_NS, RMSE, RE, AD, VAR, N, N_RE, SS, LOG_SS, DateStamp)",
-                                    fields[0], fields[1], fields[2],
-                                    fields[3], fields[4], fields[5], fields[6],
-                                    fields[7], fields[8], fields[9], fields[10],
-                                    fields[11], fields[12], fields[13]);
                             }
                         }
                         catch (Exception ex) { Console.WriteLine(ex.Message); }
@@ -1074,6 +1054,46 @@ namespace MC
             }
         }
 
+        private void writePERSiSTCoefficients()
+        {
+            using (var transaction = localConnection.BeginTransaction())
+            try
+            {
+                using (StreamReader sr = new StreamReader(MCParameters.coefficientsSummaryFile))
+                {
+                    string line;
+                    string reachName = "undefined";
+                    while ((line = sr.ReadLine()) != null)
+                    {
+                        try
+                        {
+                            string[] fields = line.Split(MCParameters.separatorChar);
+                            if (fields.Length > 2)
+                            {
+                                int rownum = int.Parse(fields[1]);
+                                if ((rownum % 9) == 0)
+                                {
+                                    reachName = fields[2];
+                                }
+                                else
+                                {
+                                    InsertCoefficients(
+                                        "(RUN, RowNumber, Reach, R2, NS, LOG_NS, RMSE, RE, AD, VAR, N, N_RE, DateStamp)",
+                                        fields[0], fields[1], reachName,
+                                        fields[2], fields[3], fields[4], fields[5],
+                                        fields[6], fields[7], fields[8], fields[9],
+                                        fields[10]);
+                                }
+                            }
+                        }
+                        catch (Exception ex) { Console.WriteLine(ex.Message); }
+                    }
+                }
+                transaction.Commit();
+            }
+            catch (Exception ex) { Console.WriteLine(ex.Message); transaction.Rollback(); }
+        }
+
         // -------------------------------------------------------------------------
         // Write parameter sets and names
         // -------------------------------------------------------------------------
@@ -1180,7 +1200,8 @@ namespace MC
                 cmd.Parameters.AddWithValue("@runID",   runID);
                 cmd.Parameters.AddWithValue("@parID",   parID);
                 cmd.Parameters.AddWithValue("@text",    textValue);
-                cmd.Parameters.AddWithValue("@numeric", isNumeric ? (object)numericValue : DBNull.Value);
+                cmd.Parameters.AddWithValue("@numeric", isNumeric ?
+                    (object)numericValue : DBNull.Value);
                 try { cmd.ExecuteNonQuery(); }
                 catch (SQLiteException ex) { Console.WriteLine(ex.Message); }
             }
@@ -1239,6 +1260,9 @@ namespace MC
             for (var i = 0; i < MCParameters.splitsToUse; i++)
             {
                 string fileName = MCParameters.resultFileNameStub + i.ToString() + ".txt";
+                if (!OpenConnection()) return;
+
+                using (var transaction = localConnection.BeginTransaction())
                 using (StreamReader sr = new StreamReader(fileName))
                 {
                     string line;
@@ -1268,7 +1292,10 @@ namespace MC
                             }
                         }
                     }
+                    transaction.Commit();
                 }
+
+                CloseConnection();
             }
         }
 
@@ -1306,44 +1333,10 @@ namespace MC
                                 tst = Convert.ToDouble(fields[2]);
                                 using (FileStream fs = new FileStream(PERSiSTOutputFile, FileMode.Append, FileAccess.Write))
                                 using (StreamWriter sw = new StreamWriter(fs))
-                                { sw.WriteLine(resultString); }
+                                    sw.WriteLine(resultString);
                             }
                             catch { }
                         }
-                    }
-                }
-            }
-        }
-
-        private void writeINCAResultsFromPERSiST()
-        {
-            string INCASummaryFile = "INCASummary.txt";
-            File.Create(INCASummaryFile).Dispose();
-
-            string[] resultFiles = Directory.GetFiles(
-                Directory.GetCurrentDirectory(),
-                MCParameters.INCAFileNameStub + "*.txt");
-
-            foreach (string f in resultFiles)
-            {
-                using (StreamReader sr = new StreamReader(f))
-                {
-                    string line;
-                    while ((line = sr.ReadLine()) != null)
-                    {
-                        string[] fields = line.Split('\t');
-                        try
-                        {
-                            string resultString =
-                                f + ", " + fields[0] + "," + fields[1] + "," +
-                                fields[2] + "," + fields[3] + "," +
-                                fields[4] + "," + fields[5];
-
-                            using (FileStream fs = new FileStream(INCASummaryFile, FileMode.Append, FileAccess.Write))
-                            using (StreamWriter sw = new StreamWriter(fs))
-                            { sw.WriteLine(resultString); }
-                        }
-                        catch (Exception ex) { Console.WriteLine(ex.Message); }
                     }
                 }
             }
